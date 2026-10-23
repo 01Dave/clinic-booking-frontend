@@ -1,0 +1,546 @@
+
+import { useCallback, useEffect, useState } from "react";
+import { clinicApi } from "./api";
+import "./App.css";
+
+function formatDate(value) {
+  return new Date(value).toLocaleDateString("en-NG", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function formatTime(value) {
+  return new Date(value).toLocaleTimeString("en-NG", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatDateTime(value) {
+  return `${formatDate(value)} at ${formatTime(value)}`;
+}
+
+function makeIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ||
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function App() {
+  const [slots, setSlots] = useState([]);
+  const [provider, setProvider] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState(null);
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingError, setBookingError] = useState("");
+  const [confirmation, setConfirmation] = useState(null);
+
+  const [lookupEmail, setLookupEmail] = useState("");
+  const [bookings, setBookings] = useState([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [currentCursor, setCurrentCursor] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState("");
+  const [cancellingId, setCancellingId] = useState("");
+
+  const loadSlots = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await clinicApi.getSlots();
+      setSlots(Array.isArray(result) ? result : []);
+    } catch (err) {
+      setError(err.message || "Could not load appointments.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchSlots() {
+      try {
+        const result = await clinicApi.getSlots();
+
+        if (active) {
+          setSlots(Array.isArray(result) ? result : []);
+        }
+      } catch (err) {
+        if (active) {
+          setError(err.message || "Could not load appointments.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchSlots();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const providers = [
+    ...new Set(slots.map((slot) => slot.provider).filter(Boolean)),
+  ];
+
+  const now = useState(() => Date.now())[0];
+
+  const visibleSlots = slots.filter((slot) => {
+    const isFuture = new Date(slot.start).getTime() > now;
+    const matchesProvider =
+      provider === "all" || slot.provider === provider;
+
+    return isFuture && slot.available && matchesProvider;
+  });
+
+  async function handleBooking(event) {
+    event.preventDefault();
+    setBookingError("");
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName || !cleanEmail) {
+      setBookingError("Please enter your name and email address.");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setBookingError("Please enter a valid email address.");
+      return;
+    }
+
+    setBookingLoading(true);
+
+    try {
+      const booking = await clinicApi.bookAppointment(
+        {
+          slot_id: selectedSlot.id,
+          name: cleanName,
+          email: cleanEmail,
+        },
+        makeIdempotencyKey()
+      );
+
+      setConfirmation({
+        ...booking,
+        provider: selectedSlot.provider,
+        start: selectedSlot.start,
+        end: selectedSlot.end,
+      });
+
+      setSelectedSlot(null);
+      setName("");
+      setEmail("");
+      await loadSlots();
+    } catch (err) {
+      setBookingError(
+        err.status === 409
+          ? "This appointment was just booked by someone else. Please choose another slot."
+          : err.message || "Booking failed. Please try again."
+      );
+      await loadSlots();
+    } finally {
+      setBookingLoading(false);
+    }
+  }
+
+  async function searchBookings(event, cursor = "") {
+    event?.preventDefault();
+    setLookupError("");
+
+    const cleanEmail = lookupEmail.trim().toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setLookupError("Enter a valid email address to find your bookings.");
+      return;
+    }
+
+    setLookupLoading(true);
+
+    try {
+      const result = await clinicApi.getBookings(cleanEmail, 10, cursor);
+      setBookings(
+        Array.isArray(result) ? result : result.bookings || []
+      );
+      setNextCursor(result.next_cursor || result.nextCursor || "");
+      setCurrentCursor(cursor);
+    } catch (err) {
+      setLookupError(err.message || "Could not find your bookings.");
+      setBookings([]);
+      setNextCursor("");
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  async function cancelBooking(id) {
+    if (!window.confirm("Are you sure you want to cancel this appointment?")) {
+      return;
+    }
+
+    setCancellingId(id);
+    setLookupError("");
+
+    try {
+      await clinicApi.cancelBooking(id);
+      await searchBookings(null, currentCursor);
+      await loadSlots();
+    } catch (err) {
+      setLookupError(err.message || "Could not cancel this appointment.");
+    } finally {
+      setCancellingId("");
+    }
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <a className="brand" href="/" aria-label="Carepoint home">
+          <span className="brand-mark">+</span>
+          <span>carepoint</span>
+        </a>
+
+        <nav className="nav-links">
+          <a href="#appointments">Appointments</a>
+          <a href="#manage-bookings">My bookings</a>
+          <a href="#about">About</a>
+        </nav>
+
+        <a className="nav-cta" href="#appointments">
+          Find a slot <span aria-hidden="true">↗</span>
+        </a>
+      </header>
+
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">
+            <span className="status-dot" /> YOUR HEALTH, OUR PRIORITY
+          </p>
+          <h1>
+            Healthcare that
+            <br />
+            fits <span>your life.</span>
+          </h1>
+          <p className="hero-description">
+            Book your next clinic visit in just a few clicks.
+            Browse available times and find the care you need.
+          </p>
+          <a className="primary-button" href="#appointments">
+            Book an appointment <span aria-hidden="true">→</span>
+          </a>
+          <div className="hero-note">
+            <span className="note-check">✓</span>
+            Simple booking. Care you can count on.
+          </div>
+        </div>
+
+        <div className="hero-art" aria-hidden="true">
+          <div className="art-circle">
+            <div className="art-cross">+</div>
+            <div className="doctor">
+              <div className="doctor-hair" />
+              <div className="doctor-face">
+                <div className="doctor-eyes" />
+                <div className="doctor-smile" />
+              </div>
+              <div className="doctor-neck" />
+              <div className="doctor-coat">
+                <div className="coat-shirt" />
+                <div className="coat-pocket" />
+                <div className="coat-stethoscope" />
+              </div>
+            </div>
+          </div>
+          <div className="art-card">
+            <span className="art-card-icon">✓</span>
+            <span>
+              <strong>Care made simple</strong>
+              <small>Your next visit, sorted.</small>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="appointments" id="appointments">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">TAKE THE NEXT STEP</p>
+            <h2>Find your appointment</h2>
+            <p className="section-description">
+              Choose a convenient time from the available appointments.
+            </p>
+          </div>
+          <button
+            className="refresh-button"
+            type="button"
+            onClick={loadSlots}
+            disabled={loading}
+          >
+            <span aria-hidden="true">↻</span> Refresh
+          </button>
+        </div>
+
+        <div className="filter-row">
+          <label htmlFor="provider-filter">Filter by provider</label>
+          <select
+            id="provider-filter"
+            value={provider}
+            onChange={(event) => setProvider(event.target.value)}
+          >
+            <option value="all">All providers</option>
+            {providers.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          <span className="slot-count">{visibleSlots.length} available</span>
+        </div>
+
+        {error && (
+          <div className="notice notice-error" role="alert">
+            <strong>Couldn't load appointments.</strong>
+            <p>{error}</p>
+            <button type="button" onClick={loadSlots}>Try again</button>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="empty-state">
+            <div className="loader" />
+            <p>Finding available appointments…</p>
+          </div>
+        ) : !error && visibleSlots.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">▦</div>
+            <h3>No available appointments yet</h3>
+            <p>Try refreshing later or choosing another provider.</p>
+          </div>
+        ) : (
+          <div className="slot-grid">
+            {visibleSlots.map((slot) => (
+              <article className="slot-card" key={slot.id}>
+                <div className="slot-card-top">
+                  <span className="provider-avatar">
+                    {(slot.provider || "C").charAt(0).toUpperCase()}
+                  </span>
+                  <span className="available-badge">
+                    <span className="status-dot" /> Available
+                  </span>
+                </div>
+                <p className="slot-provider">{slot.provider || "Clinic provider"}</p>
+                <h3>{formatDate(slot.start)}</h3>
+                <p className="slot-time">
+                  {formatTime(slot.start)} – {formatTime(slot.end)}
+                </p>
+                <button
+                  className="slot-book-button"
+                  type="button"
+                  onClick={() => {
+                    setSelectedSlot(slot);
+                    setBookingError("");
+                  }}
+                >
+                  Choose appointment <span aria-hidden="true">→</span>
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="manage-section" id="manage-bookings">
+        <div className="manage-heading">
+          <p className="eyebrow">YOUR APPOINTMENTS</p>
+          <h2>Manage your bookings</h2>
+          <p>Enter the email address used when booking to find or cancel an appointment.</p>
+        </div>
+
+        <form className="lookup-form" onSubmit={(event) => searchBookings(event)}>
+          <label htmlFor="lookup-email">Email address</label>
+          <div className="lookup-controls">
+            <input
+              id="lookup-email"
+              type="email"
+              value={lookupEmail}
+              onChange={(event) => setLookupEmail(event.target.value)}
+              placeholder="you@example.com"
+              required
+            />
+            <button className="primary-button" type="submit" disabled={lookupLoading}>
+              {lookupLoading ? "Searching…" : "Find bookings"}
+            </button>
+          </div>
+        </form>
+
+        {lookupError && <div className="notice notice-error" role="alert">{lookupError}</div>}
+
+        {bookings.length > 0 && (
+          <div className="booking-list">
+            {bookings.map((booking) => (
+              <article className="booking-row" key={booking.id}>
+                <div className="booking-info">
+                  <strong>{booking.name}</strong>
+                  <span>{booking.email}</span>
+                  <small>Booking ID: {booking.id}</small>
+                  <span className={`booking-status status-${booking.status}`}>
+                    {booking.status}
+                  </span>
+                </div>
+                {booking.status !== "cancelled" && (
+                  <button
+                    className="cancel-button"
+                    type="button"
+                    disabled={cancellingId === booking.id}
+                    onClick={() => cancelBooking(booking.id)}
+                  >
+                    {cancellingId === booking.id ? "Cancelling…" : "Cancel booking"}
+                  </button>
+                )}
+              </article>
+            ))}
+            {nextCursor && (
+              <button
+                className="refresh-button"
+                type="button"
+                disabled={lookupLoading}
+                onClick={() => searchBookings(null, nextCursor)}
+              >
+                Load more bookings
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="about-strip" id="about">
+        <div>
+          <span className="about-icon">♡</span>
+          <h3>Care around your schedule</h3>
+          <p>Find a time that works for you.</p>
+        </div>
+        <div>
+          <span className="about-icon">✓</span>
+          <h3>Simple and straightforward</h3>
+          <p>Book with just your basic details.</p>
+        </div>
+        <div>
+          <span className="about-icon">+</span>
+          <h3>Focused on your wellbeing</h3>
+          <p>Your next step towards better care.</p>
+        </div>
+      </section>
+
+      <footer className="footer">
+        <a className="brand footer-brand" href="/">
+          <span className="brand-mark">+</span><span>carepoint</span>
+        </a>
+        <p>Making your next appointment simpler.</p>
+        <span>© {new Date().getFullYear()} Carepoint</span>
+      </footer>
+
+      {selectedSlot && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !bookingLoading) {
+              setSelectedSlot(null);
+            }
+          }}
+        >
+          <section
+            className="booking-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="booking-title"
+          >
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => !bookingLoading && setSelectedSlot(null)}
+              aria-label="Close"
+              disabled={bookingLoading}
+            >
+              ×
+            </button>
+
+            <p className="eyebrow">YOUR NEXT VISIT</p>
+            <h2 id="booking-title">Book an appointment</h2>
+            <div className="selected-summary">
+              <strong>{selectedSlot.provider || "Clinic provider"}</strong>
+              <span>{formatDateTime(selectedSlot.start)}</span>
+              <span>Ends at {formatTime(selectedSlot.end)}</span>
+            </div>
+
+            <form className="booking-form" onSubmit={handleBooking}>
+              <label htmlFor="patient-name">Full name</label>
+              <input
+                id="patient-name"
+                autoComplete="name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Enter your full name"
+                required
+                maxLength={120}
+              />
+
+              <label htmlFor="patient-email">Email address</label>
+              <input
+                id="patient-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                required
+                maxLength={254}
+              />
+
+              {bookingError && (
+                <div className="notice notice-error" role="alert">{bookingError}</div>
+              )}
+
+              <button className="primary-button modal-action" type="submit" disabled={bookingLoading}>
+                {bookingLoading ? "Confirming…" : "Confirm appointment"}
+              </button>
+            </form>
+            <p className="modal-footnote">Please check your details before confirming.</p>
+          </section>
+        </div>
+      )}
+
+      {confirmation && (
+        <div className="modal-backdrop">
+          <section className="booking-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+            <div className="confirmation-check">✓</div>
+            <p className="eyebrow">BOOKING RECEIVED</p>
+            <h2 id="confirmation-title">You're all set!</h2>
+            <p>Your appointment booking has been submitted.</p>
+            <div className="selected-summary">
+              <strong>{confirmation.provider || "Clinic provider"}</strong>
+              <span>{confirmation.start ? formatDateTime(confirmation.start) : `Slot: ${confirmation.slot_id}`}</span>
+              <span>{confirmation.name}</span>
+              <span>{confirmation.email}</span>
+              {confirmation.id && <small>Booking reference: {confirmation.id}</small>}
+              {confirmation.status && <small>Status: {confirmation.status}</small>}
+            </div>
+            <button className="primary-button modal-action" type="button" onClick={() => setConfirmation(null)}>
+              Done
+            </button>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+export default App;
