@@ -3,14 +3,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 
 async function request(path, options = {}) {
-  if (!API_BASE_URL) {
-    throw new Error("Configure VITE_API_BASE_URL in your .env file.");
-  }
-
-  if (!API_KEY) {
-    throw new Error("Configure VITE_API_KEY in your .env file.");
-  }
-
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
@@ -23,18 +15,35 @@ async function request(path, options = {}) {
 
   const text = await response.text();
 
-const data = (() => {
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
-})();
+  const data = (() => {
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return null;
+    }
+  })();
 
   if (!response.ok) {
+    const messages = {
+      400: "Some details are invalid. Please check them and try again.",
+      401: "The API rejected the request. Check the API configuration.",
+      404: "The requested appointment or booking could not be found.",
+      409: "This appointment is no longer available or its status has changed.",
+      422: "This retry does not match the original booking request.",
+      429: "Too many attempts. Please wait before trying again.",
+      500: "The server encountered an error. Please try again shortly.",
+      502: "The booking service is temporarily unavailable.",
+      503: "The booking service is temporarily unavailable.",
+      504: "The booking service took too long to respond.",
+    };
+
     const error = new Error(
-      data?.error || `Request failed with status ${response.status}`
+      messages[response.status] ||
+        (response.status >= 500
+          ? "The booking service encountered an error. Please try again shortly."
+          : data?.error || `Request failed with status ${response.status}`)
     );
+
     error.status = response.status;
     error.retryAfter = response.headers.get("Retry-After");
     throw error;

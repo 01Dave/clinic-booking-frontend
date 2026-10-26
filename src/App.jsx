@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clinicApi } from "./api";
 import "./App.css";
 
@@ -33,6 +33,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const pendingBookingRef = useRef(null);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -144,15 +145,31 @@ function App() {
 
     setBookingLoading(true);
 
-    try {
-      const booking = await clinicApi.bookAppointment(
-        {
-          slot_id: selectedSlot.id,
-          name: cleanName,
-          email: cleanEmail,
-        },
-        makeIdempotencyKey()
-      );
+const bookingPayload = {
+  slot_id: selectedSlot.id,
+  name: cleanName,
+  email: cleanEmail,
+};
+
+const fingerprint = JSON.stringify(bookingPayload);
+
+if (
+  !pendingBookingRef.current ||
+  pendingBookingRef.current.fingerprint !== fingerprint
+) {
+  pendingBookingRef.current = {
+    fingerprint,
+    key: makeIdempotencyKey(),
+  };
+}
+
+try {
+  const booking = await clinicApi.bookAppointment(
+    bookingPayload,
+    pendingBookingRef.current.key
+  );
+
+  pendingBookingRef.current = null;
 
       setReferenceCopied(false);
       setCopyReferenceError("");
@@ -179,6 +196,7 @@ function App() {
     }
   }
 
+  
   async function searchBookings(event, cursor = "") {
     event?.preventDefault();
     setLookupError("");
@@ -194,19 +212,53 @@ function App() {
 
     try {
       const result = await clinicApi.getBookings(cleanEmail, 10, cursor);
-      setBookings(
-        Array.isArray(result) ? result : result.bookings || []
+      const pageBookings = Array.isArray(result)
+        ? result
+        : result.bookings || [];
+
+      setBookings((previous) =>
+        cursor ? [...previous, ...pageBookings] : pageBookings
       );
-      setNextCursor(result.next_cursor || result.nextCursor || "");
+
+      setNextCursor(
+        Array.isArray(result)
+          ? ""
+          : result.next_cursor || result.nextCursor || ""
+      );
       setCurrentCursor(cursor);
     } catch (err) {
-      setLookupError(err.message || "Could not find your bookings.");
-      setBookings([]);
-      setNextCursor("");
+      if (err.status === 429) {
+        const wait = Number(err.retryAfter);
+
+        setLookupError(
+          Number.isFinite(wait) && wait > 0
+            ? `Too many requests. Please wait ${wait} seconds before searching again.`
+            : "Too many requests. Please wait before searching again."
+        );
+      } else if (err.status === 401) {
+        setLookupError(
+          "The API rejected the request. Please check the API configuration."
+        );
+      } else if (err.status >= 500) {
+        setLookupError(
+          "The booking service is temporarily unavailable. Please try again shortly."
+        );
+      } else {
+        setLookupError(
+          err.message || "Could not find your bookings. Please try again."
+        );
+      }
+
+      // Keep previously loaded bookings if a later page fails.
+      if (!cursor) {
+        setBookings([]);
+        setNextCursor("");
+      }
     } finally {
       setLookupLoading(false);
     }
   }
+
 
   async function cancelBooking(id) {
     if (!window.confirm("Are you sure you want to cancel this appointment?")) {
@@ -221,10 +273,34 @@ function App() {
       await searchBookings(null, currentCursor);
       await loadSlots();
     } catch (err) {
-      setLookupError(err.message || "Could not cancel this appointment.");
-    } finally {
-      setCancellingId("");
-    }
+  if (err.status === 404) {
+    setLookupError(
+      "This booking could not be found. Refresh your booking list."
+    );
+  } else if (err.status === 409) {
+    setLookupError(
+      "This booking has already been cancelled or its status has changed."
+    );
+  } else if (err.status === 429) {
+    const wait = Number(err.retryAfter);
+
+    setLookupError(
+      Number.isFinite(wait) && wait > 0
+        ? `Too many requests. Please wait ${wait} seconds before trying again.`
+        : "Too many requests. Please wait before trying again."
+    );
+  } else if (err.status >= 500) {
+    setLookupError(
+      "The booking service is temporarily unavailable. Please try again."
+    );
+  } else {
+    setLookupError(
+      err.message || "Could not cancel this appointment. Please try again."
+    );
+  }
+} finally {
+  setCancellingId("");
+}
   }
 
   return (
