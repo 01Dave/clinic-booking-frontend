@@ -39,6 +39,9 @@ function App() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
+  const [referenceCopied, setReferenceCopied] = useState(false);
+  const [copyReferenceError, setCopyReferenceError] = useState("");
+  
 
   const [lookupEmail, setLookupEmail] = useState("");
   const [bookings, setBookings] = useState([]);
@@ -102,6 +105,26 @@ function App() {
     return isFuture && slot.available && matchesProvider;
   });
 
+  async function handleCopyReference() {
+  if (!confirmation?.id) return;
+
+  setCopyReferenceError("");
+
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("Clipboard access is unavailable.");
+    }
+
+    await navigator.clipboard.writeText(String(confirmation.id));
+    setReferenceCopied(true);
+  } catch {
+    setReferenceCopied(false);
+    setCopyReferenceError(
+      "Copying isn't available in this browser. Please select and copy the reference manually."
+    );
+  }
+}
+  
   async function handleBooking(event) {
     event.preventDefault();
     setBookingError("");
@@ -131,6 +154,8 @@ function App() {
         makeIdempotencyKey()
       );
 
+      setReferenceCopied(false);
+      setCopyReferenceError("");
       setConfirmation({
         ...booking,
         provider: selectedSlot.provider,
@@ -519,26 +544,97 @@ function App() {
       )}
 
       {confirmation && (
-        <div className="modal-backdrop">
-          <section className="booking-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
-            <div className="confirmation-check">✓</div>
-            <p className="eyebrow">BOOKING RECEIVED</p>
-            <h2 id="confirmation-title">You're all set!</h2>
-            <p>Your appointment booking has been submitted.</p>
-            <div className="selected-summary">
-              <strong>{confirmation.provider || "Clinic provider"}</strong>
-              <span>{confirmation.start ? formatDateTime(confirmation.start) : `Slot: ${confirmation.slot_id}`}</span>
-              <span>{confirmation.name}</span>
-              <span>{confirmation.email}</span>
-              {confirmation.id && <small>Booking reference: {confirmation.id}</small>}
-              {confirmation.status && <small>Status: {confirmation.status}</small>}
-            </div>
-            <button className="primary-button modal-action" type="button" onClick={() => setConfirmation(null)}>
-              Done
+  <div className="modal-backdrop">
+    <section
+      className="booking-modal confirmation-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirmation-title"
+      aria-describedby="confirmation-description"
+    >
+      <div className="confirmation-check" aria-hidden="true">
+        ✓
+      </div>
+
+      <p className="eyebrow">BOOKING RECEIVED</p>
+      <h2 id="confirmation-title">You're all set!</h2>
+
+      <p id="confirmation-description" className="confirmation-description">
+        Your appointment booking has been submitted successfully.
+      </p>
+
+      <div className="selected-summary confirmation-summary">
+        <span className="confirmation-label">PROVIDER</span>
+        <strong>{confirmation.provider || "Clinic provider"}</strong>
+
+        <span className="confirmation-label">DATE AND TIME</span>
+        <strong>
+          {confirmation.start
+            ? formatDateTime(confirmation.start)
+            : `Slot: ${confirmation.slot_id}`}
+        </strong>
+
+        {confirmation.end && (
+          <>
+            <span className="confirmation-label">END TIME</span>
+            <strong>{formatDateTime(confirmation.end)}</strong>
+          </>
+        )}
+
+        <span className="confirmation-label">PATIENT</span>
+        <strong>{confirmation.name}</strong>
+        <span>{confirmation.email}</span>
+
+        {confirmation.status && (
+          <div className="confirmation-status">
+            <span>Status</span>
+            <strong>{confirmation.status}</strong>
+          </div>
+        )}
+      </div>
+
+      {confirmation.id && (
+        <div className="reference-panel">
+          <span className="confirmation-label">BOOKING REFERENCE</span>
+
+          <div className="reference-value-row">
+            <code className="reference-value">{confirmation.id}</code>
+
+            <button
+              className="copy-reference-button"
+              type="button"
+              onClick={handleCopyReference}
+            >
+              {referenceCopied ? "Copied!" : "Copy reference"}
             </button>
-          </section>
+          </div>
+
+          <p className="reference-help">
+            Keep this reference in case you need to check your appointment.
+          </p>
+
+          <p className="copy-feedback" aria-live="polite" role="status">
+            {referenceCopied
+              ? "Booking reference copied to clipboard."
+              : copyReferenceError}
+          </p>
         </div>
       )}
+
+      <button
+        className="primary-button modal-action"
+        type="button"
+        onClick={() => {
+          setConfirmation(null);
+          setReferenceCopied(false);
+          setCopyReferenceError("");
+        }}
+      >
+        Done
+      </button>
+    </section>
+  </div>
+)}
     </main>
   );
 }

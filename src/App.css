@@ -1154,3 +1154,129 @@
     width: 100%;
   }
 }
+
+
+/* Improved booking confirmation */
+.confirmation-modal {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.confirmation-description {
+  line-height: 1.6;
+}
+
+.confirmation-summary {
+  gap: 8px;
+  text-align: left;
+}
+
+.confirmation-label {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+
+.confirmation-summary > strong {
+  overflow-wrap: anywhere;
+}
+
+.confirmation-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.confirmation-status strong {
+  overflow-wrap: anywhere;
+}
+
+.reference-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--pale-blue);
+  text-align: left;
+}
+
+.reference-value-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.reference-value {
+  min-width: 0;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.copy-reference-button {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--blue);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.copy-reference-button:hover {
+  background: #f0f6ff;
+}
+
+.copy-reference-button:focus-visible {
+  outline: 3px solid #9bc3ff;
+  outline-offset: 3px;
+}
+
+.reference-help {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.copy-feedback {
+  min-height: 18px;
+  margin: 8px 0 0;
+  color: var(--blue-dark);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 480px) {
+  .confirmation-modal {
+    width: calc(100% - 24px);
+    max-width: 100%;
+    padding: 24px 18px;
+  }
+
+  .reference-panel {
+    padding: 12px;
+  }
+
+  .reference-value-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .copy-reference-button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
